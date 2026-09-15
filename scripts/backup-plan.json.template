@@ -1,0 +1,21 @@
+{
+  "BackupPlanName": "DailyProdBackups",
+  "Rules": [
+    {
+      "RuleName": "DailyBackups",
+      "TargetBackupVaultName": "__BACKUP_VAULT_NAME__",
+      "ScheduleExpression": "cron(0 0 * * ? *)",
+      "StartWindowMinutes": 60,
+      "CompletionWindowMinutes": 180,
+      "Lifecycle": {
+        "MoveToColdStorageAfterDays": 30,
+        "DeleteAfterDays": 365
+      },
+      "CopyActions": [
+        {
+          "DestinationBackupVaultArn": "arn:aws:backup:__SECONDARY_REGION__:__AWS_ACCOUNT_ID__:backup-vault:__SECONDARY_BACKUP_VAULT_NAME__"
+        }
+      ]
+    }
+  ]
+}
