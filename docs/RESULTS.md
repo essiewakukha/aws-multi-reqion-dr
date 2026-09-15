@@ -34,7 +34,7 @@ The RPO figure (≤5 min data loss) is normally measured as the gap between the 
 
 ## Screenshots
 
-Add screenshots to `architecture/screenshots/` and reference them here:
+Add screenshots to `docs` and reference them here:
 
 - [ ] Backup plan configuration in the console
 - [ ] Recovery points visible in both region vaults
