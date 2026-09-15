@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Route 53 health check on the primary endpoint plus PRIMARY/SECONDARY
+  failover A records. Deploy once, in any region (Route 53 is global).
+
+Parameters:
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+  AppRecordName:
+    Type: String
+    Default: app.example.com
+  PrimaryEndpoint:
+    Type: String
+    Description: FQDN of the primary endpoint used for the health check (e.g. an ALB DNS name)
+  PrimaryIp:
+    Type: String
+  SecondaryIp:
+    Type: String
+  TTL:
+    Type: String
+    Default: '60'
+
+Resources:
+  PrimaryHealthCheck:
+    Type: AWS::Route53::HealthCheck
+    Properties:
+      HealthCheckConfig:
+        Type: HTTP
+        FullyQualifiedDomainName: !Ref PrimaryEndpoint
+        Port: 80
+        ResourcePath: /
+        RequestInterval: 30
+        FailureThreshold: 3
+      HealthCheckTags:
+        - Key: Name
+          Value: primary-endpoint-health
+
+  PrimaryRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref AppRecordName
+      Type: A
+      SetIdentifier: Primary
+      Failover: PRIMARY
+      TTL: !Ref TTL
+      ResourceRecords:
+        - !Ref PrimaryIp
+      HealthCheckId: !Ref PrimaryHealthCheck
+
+  SecondaryRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref AppRecordName
+      Type: A
+      SetIdentifier: Secondary
+      Failover: SECONDARY
+      TTL: !Ref TTL
+      ResourceRecords:
+        - !Ref SecondaryIp
+
+Outputs:
+  HealthCheckId:
+    Value: !Ref PrimaryHealthCheck
+    Description: Pass this to monitoring.yaml as HealthCheckId
