@@ -1,0 +1,24 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Secondary-region backup vault. Deploy this FIRST, in the secondary region,
+  so its ARN can be passed as SecondaryVaultArn to backup-primary.yaml.
+
+Parameters:
+  BackupVaultName:
+    Type: String
+    Default: prod-backup-vault-secondary
+  KmsKeyArn:
+    Type: String
+    Description: ARN of the KMS key used to encrypt the secondary backup vault (must exist in this region)
+
+Resources:
+  SecondaryBackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !Ref BackupVaultName
+      EncryptionKeyArn: !Ref KmsKeyArn
+
+Outputs:
+  SecondaryVaultArn:
+    Value: !GetAtt SecondaryBackupVault.BackupVaultArn
+    Description: Pass this as SecondaryVaultArn when deploying backup-primary.yaml
