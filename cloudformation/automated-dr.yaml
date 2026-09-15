@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Automated DR responder: subscribes a Lambda to the dr-failover-alerts SNS
+  topic and scales the secondary region's ASG to full capacity when the
+  primary endpoint alarm fires. Deploy after monitoring.yaml.
+
+Parameters:
+  AlertTopicArn:
+    Type: String
+    Description: Output from monitoring.yaml (DrAlertTopicArn)
+  SecondaryRegion:
+    Type: String
+    Default: eu-central-1
+  SecondaryAsgName:
+    Type: String
+    Description: Name of the Auto Scaling Group backing the secondary web endpoint
+  ScaleUpDesiredCapacity:
+    Type: Number
+    Default: 4
+  WarmStandbyDesiredCapacity:
+    Type: Number
+    Default: 1
+  ScaleDownOnRecovery:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  LambdaCodeS3Bucket:
+    Type: String
+    Description: S3 bucket containing lambda_function.py zipped as automated-failover.zip
+  LambdaCodeS3Key:
+    Type: String
+    Default: automated-failover.zip
+
+Resources:
+  AutomatedDrRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: scale-secondary-asg
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:SetDesiredCapacity
+                  - autoscaling:DescribeAutoScalingGroups
+                Resource: '*'
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref AlertTopicArn
+
+  AutomatedDrFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: automated-dr-responder
+      Runtime: python3.12
+      Handler: lambda_function.handler
+      Role: !GetAtt AutomatedDrRole.Arn
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          SECONDARY_REGION: !Ref SecondaryRegion
+          SECONDARY_ASG_NAME: !Ref SecondaryAsgName
+          SCALE_UP_DESIRED_CAPACITY: !Ref ScaleUpDesiredCapacity
+          WARM_STANDBY_DESIRED_CAPACITY: !Ref WarmStandbyDesiredCapacity
+          SCALE_DOWN_ON_RECOVERY: !Ref ScaleDownOnRecovery
+          ALERT_TOPIC_ARN: !Ref AlertTopicArn
+
+  SnsInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AutomatedDrFunction
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref AlertTopicArn
+
+  AlarmSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopicArn
+      Protocol: lambda
+      Endpoint: !GetAtt AutomatedDrFunction.Arn
+
+Outputs:
+  FunctionArn:
+    Value: !GetAtt AutomatedDrFunction.Arn
