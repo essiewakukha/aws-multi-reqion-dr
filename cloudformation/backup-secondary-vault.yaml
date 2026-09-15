@@ -7,16 +7,16 @@ Parameters:
   BackupVaultName:
     Type: String
     Default: prod-backup-vault-secondary
-  KmsKeyArn:
-    Type: String
-    Description: ARN of the KMS key used to encrypt the secondary backup vault (must exist in this region)
 
 Resources:
   SecondaryBackupVault:
     Type: AWS::Backup::BackupVault
     Properties:
       BackupVaultName: !Ref BackupVaultName
-      EncryptionKeyArn: !Ref KmsKeyArn
+      # No EncryptionKeyArn set - AWS Backup uses its own AWS-managed key
+      # (aws/backup) by default, which avoids the ~$1/month customer-managed
+      # KMS key cost. Fine for a lab; use a customer-managed key in production
+      # if you need key rotation/audit control beyond the managed default.
 
 Outputs:
   SecondaryVaultArn:

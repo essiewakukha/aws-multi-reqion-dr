@@ -12,9 +12,6 @@ Parameters:
   SecondaryVaultArn:
     Type: String
     Description: ARN of the backup vault in the secondary region (deploy backup-secondary-vault.yaml there first)
-  KmsKeyArn:
-    Type: String
-    Description: ARN of the KMS key used to encrypt the primary backup vault
   TagKey:
     Type: String
     Default: Environment
@@ -37,7 +34,8 @@ Resources:
     Type: AWS::Backup::BackupVault
     Properties:
       BackupVaultName: !Ref BackupVaultName
-      EncryptionKeyArn: !Ref KmsKeyArn
+      # No EncryptionKeyArn - uses the AWS-managed aws/backup key. See the
+      # note in backup-secondary-vault.yaml for why.
 
   BackupRole:
     Type: AWS::IAM::Role

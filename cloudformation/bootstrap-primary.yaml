@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Minimal baseline infrastructure in the PRIMARY region: one web instance
+  (the DR health check + failover target) and one RDS MySQL instance
+  (the thing AWS Backup actually protects). Deploy this FIRST, before any
+  backup/DNS/monitoring stack - there's nothing to protect otherwise.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Use your default VPC unless you have a reason not to (aws ec2 describe-vpcs --filters Name=isDefault,Values=true)
+  WebSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: A public subnet for the web instance
+  DbSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least 2 subnets in different AZs, for the RDS subnet group
+  DbMasterUsername:
+    Type: String
+    Default: admin
+  DbMasterPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: RDS master password - at least 8 characters
+  InstanceType:
+    Type: String
+    Default: t3.micro
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP for the DR lab health check (lab only - do not use this open a rule in production)
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  WebInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      SubnetId: !Ref WebSubnetId
+      SecurityGroupIds: [!Ref WebSecurityGroup]
+      Tags:
+        - Key: Name
+          Value: dr-primary-web
+        - Key: Environment
+          Value: Production
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          dnf install -y httpd
+          echo "OK from primary ($AWS::Region)" > /var/www/html/index.html
+          systemctl enable --now httpd
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow MySQL from the web security group only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref WebSecurityGroup
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: DR lab RDS subnet group
+      SubnetIds: !Ref DbSubnetIds
+
+  OrdersDatabase:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    Properties:
+      DBInstanceIdentifier: orders-db
+      Engine: mysql
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: '20'
+      MasterUsername: !Ref DbMasterUsername
+      MasterUserPassword: !Ref DbMasterPassword
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups: [!GetAtt DbSecurityGroup.GroupId]
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 1
+      Tags:
+        - Key: Environment
+          Value: Production
+        - Key: Name
+          Value: orders-db
+
+Outputs:
+  PrimaryPublicIp:
+    Value: !GetAtt WebInstance.PublicIp
+  PrimaryInstanceId:
+    Value: !Ref WebInstance
+  RdsEndpoint:
+    Value: !GetAtt OrdersDatabase.Endpoint.Address
