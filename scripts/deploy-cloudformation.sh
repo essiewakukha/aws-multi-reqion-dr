@@ -14,7 +14,7 @@ out() { # out <stack-name> <region> <output-key>
 
 echo ">> 0a/7 Bootstrap: primary region web instance + RDS ($PRIMARY_REGION)"
 aws cloudformation deploy \
-  --template-file cloudformation/00-bootstrap-primary.yaml \
+  --template-file cloudformation/bootstrap-primary.yaml \
   --stack-name dr-bootstrap-primary \
   --region "$PRIMARY_REGION" \
   --parameter-overrides VpcId="$VPC_ID" WebSubnetId="$PRIMARY_WEB_SUBNET_ID" \
@@ -28,7 +28,7 @@ echo "   Primary IP: $PRIMARY_IP | Instance: $PRIMARY_INSTANCE_ID | RDS: $RDS_EN
 
 echo ">> 0b/7 Bootstrap: secondary region DNS target + warm-standby ASG ($SECONDARY_REGION)"
 aws cloudformation deploy \
-  --template-file cloudformation/00-bootstrap-secondary.yaml \
+  --template-file cloudformation/bootstrap-secondary.yaml \
   --stack-name dr-bootstrap-secondary \
   --region "$SECONDARY_REGION" \
   --parameter-overrides VpcId="$SECONDARY_VPC_ID" WebSubnetId="$SECONDARY_WEB_SUBNET_ID" \
@@ -95,7 +95,7 @@ aws cloudformation deploy \
 
 cat >> "$DIR/.env" << ENV_EOF
 
-# --- Auto-populated by 07-deploy-cloudformation.sh on $(date) ---
+# --- Auto-populated by deploy-cloudformation.sh on $(date) ---
 PRIMARY_IP=$PRIMARY_IP
 PRIMARY_INSTANCE_ID=$PRIMARY_INSTANCE_ID
 SECONDARY_IP=$SECONDARY_IP

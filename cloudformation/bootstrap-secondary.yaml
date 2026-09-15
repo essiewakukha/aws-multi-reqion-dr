@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Minimal baseline infrastructure in the SECONDARY region: a standalone
+  instance that acts as the stable DNS failover target, plus a small
+  Auto Scaling Group (the actual "warm standby -> scale up" resource the
+  automated-dr Lambda operates on). Deploy this alongside 00-bootstrap-primary.yaml,
+  in the SECONDARY region.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  WebSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet for the standalone DNS-target instance
+  AsgSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least 2 subnets in different AZs, for the Auto Scaling Group
+  InstanceType:
+    Type: String
+    Default: t3.micro
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+  WarmStandbyDesiredCapacity:
+    Type: Number
+    Default: 1
+
+Resources:
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP for the DR lab (lab only)
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  # Standalone instance: stable IP that the Route 53 SECONDARY record points to.
+  DnsTargetInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      SubnetId: !Ref WebSubnetId
+      SecurityGroupIds: [!Ref WebSecurityGroup]
+      Tags:
+        - Key: Name
+          Value: dr-secondary-dns-target
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          dnf install -y httpd
+          echo "OK from secondary ($AWS::Region)" > /var/www/html/index.html
+          systemctl enable --now httpd
+
+  WebLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: dr-secondary-web-lt
+      LaunchTemplateData:
+        InstanceType: !Ref InstanceType
+        ImageId: !Ref LatestAmiId
+        SecurityGroupIds: [!Ref WebSecurityGroup]
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            dnf install -y httpd
+            echo "OK from secondary ASG ($AWS::Region)" > /var/www/html/index.html
+            systemctl enable --now httpd
+
+  # This is the resource the automated-dr Lambda scales from Warm Standby to full capacity.
+  WebAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: dr-secondary-web-asg
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebLaunchTemplate
+        Version: !GetAtt WebLaunchTemplate.LatestVersionNumber
+      MinSize: 0
+      MaxSize: 4
+      DesiredCapacity: !Ref WarmStandbyDesiredCapacity
+      VPCZoneIdentifier: !Ref AsgSubnetIds
+      Tags:
+        - Key: Name
+          Value: dr-secondary-web-asg
+          PropagateAtLaunch: true
+
+Outputs:
+  SecondaryPublicIp:
+    Value: !GetAtt DnsTargetInstance.PublicIp
+  AsgName:
+    Value: !Ref WebAutoScalingGroup

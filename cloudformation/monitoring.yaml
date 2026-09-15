@@ -1,81 +1,93 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Creates its own Route 53 hosted zone (no domain purchase required for a
-  lab - you validate by querying the zone's own nameservers directly with
-  dig, rather than via public delegation), an IP-based health check on the
-  primary instance, and PRIMARY/SECONDARY failover A records.
+  CloudWatch alarm on the Route 53 health check (must exist in us-east-1
+  metrics, as Route 53 health check metrics are always published there).
+  Publishes to an SNS topic for both human alerting (email) and the
+  automated-dr Lambda subscription.
 
 Parameters:
-  ZoneName:
+  HealthCheckId:
     Type: String
-    Default: dr-lab.internal
-    Description: Any name works - this zone is queried directly via its nameservers, not through public DNS delegation
-  AppRecordName:
+    Description: Output from route53-failover.yaml
+  AlertEmail:
     Type: String
-    Default: app.dr-lab.internal
-  PrimaryIp:
-    Type: String
-    Description: Public IP of the primary web instance (health check target)
-  SecondaryIp:
-    Type: String
-    Description: Public IP of the secondary web instance
-  TTL:
-    Type: String
-    Default: '60'
+    Description: Email address to notify on failover events
+    Default: ''
+
+Conditions:
+  HasEmail: !Not [!Equals [!Ref AlertEmail, '']]
 
 Resources:
-  DrHostedZone:
-    Type: AWS::Route53::HostedZone
+  DrAlertTopic:
+    Type: AWS::SNS::Topic
     Properties:
-      Name: !Ref ZoneName
-      HostedZoneConfig:
-        Comment: DR lab zone - queried directly via its own nameservers, not publicly delegated
+      TopicName: dr-failover-alerts
+      DisplayName: DR Failover Alerts
 
-  PrimaryHealthCheck:
-    Type: AWS::Route53::HealthCheck
+  EmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasEmail
     Properties:
-      HealthCheckConfig:
-        Type: HTTP
-        IPAddress: !Ref PrimaryIp
-        Port: 80
-        ResourcePath: /
-        RequestInterval: 30
-        FailureThreshold: 3
-      HealthCheckTags:
-        - Key: Name
-          Value: primary-endpoint-health
+      TopicArn: !Ref DrAlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
 
-  PrimaryRecord:
-    Type: AWS::Route53::RecordSet
+  PrimaryUnhealthyAlarm:
+    Type: AWS::CloudWatch::Alarm
     Properties:
-      HostedZoneId: !Ref DrHostedZone
-      Name: !Ref AppRecordName
-      Type: A
-      SetIdentifier: Primary
-      Failover: PRIMARY
-      TTL: !Ref TTL
-      ResourceRecords:
-        - !Ref PrimaryIp
-      HealthCheckId: !Ref PrimaryHealthCheck
+      AlarmName: primary-endpoint-unhealthy
+      AlarmDescription: Fires when the Route 53 health check on the primary endpoint goes unhealthy
+      Namespace: AWS/Route53
+      MetricName: HealthCheckStatus
+      Dimensions:
+        - Name: HealthCheckId
+          Value: !Ref HealthCheckId
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref DrAlertTopic
+      OKActions:
+        - !Ref DrAlertTopic
 
-  SecondaryRecord:
-    Type: AWS::Route53::RecordSet
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
     Properties:
-      HostedZoneId: !Ref DrHostedZone
-      Name: !Ref AppRecordName
-      Type: A
-      SetIdentifier: Secondary
-      Failover: SECONDARY
-      TTL: !Ref TTL
-      ResourceRecords:
-        - !Ref SecondaryIp
+      DashboardName: dr-failover-dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Primary endpoint health check status",
+                "metrics": [
+                  ["AWS/Route53", "HealthCheckStatus", "HealthCheckId", "${HealthCheckId}"]
+                ],
+                "period": 60,
+                "stat": "Minimum",
+                "region": "us-east-1",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "alarm",
+              "x": 0, "y": 6, "width": 12, "height": 4,
+              "properties": {
+                "title": "Failover alarm state",
+                "alarms": ["${PrimaryUnhealthyAlarm.Arn}"]
+              }
+            }
+          ]
+        }
 
 Outputs:
-  HealthCheckId:
-    Value: !Ref PrimaryHealthCheck
-    Description: Pass this to monitoring.yaml as HealthCheckId
-  HostedZoneId:
-    Value: !Ref DrHostedZone
-  NameServers:
-    Value: !Join [', ', !GetAtt DrHostedZone.NameServers]
-    Description: Query these directly, e.g. dig @<one-of-these> app.dr-lab.internal
+  DrAlertTopicArn:
+    Value: !Ref DrAlertTopic
+    Description: Pass this to automated-dr.yaml as AlertTopicArn
+  DashboardUrl:
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=dr-failover-dashboard'

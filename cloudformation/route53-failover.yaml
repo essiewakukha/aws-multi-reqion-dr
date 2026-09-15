@@ -1,32 +1,42 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Route 53 health check on the primary endpoint plus PRIMARY/SECONDARY
-  failover A records. Deploy once, in any region (Route 53 is global).
+  Creates its own Route 53 hosted zone (no domain purchase required for a
+  lab - you validate by querying the zone's own nameservers directly with
+  dig, rather than via public delegation), an IP-based health check on the
+  primary instance, and PRIMARY/SECONDARY failover A records.
 
 Parameters:
-  HostedZoneId:
-    Type: AWS::Route53::HostedZone::Id
+  ZoneName:
+    Type: String
+    Default: dr-lab.internal
+    Description: Any name works - this zone is queried directly via its nameservers, not through public DNS delegation
   AppRecordName:
     Type: String
-    Default: app.example.com
-  PrimaryEndpoint:
-    Type: String
-    Description: FQDN of the primary endpoint used for the health check (e.g. an ALB DNS name)
+    Default: app.dr-lab.internal
   PrimaryIp:
     Type: String
+    Description: Public IP of the primary web instance (health check target)
   SecondaryIp:
     Type: String
+    Description: Public IP of the secondary web instance
   TTL:
     Type: String
     Default: '60'
 
 Resources:
+  DrHostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref ZoneName
+      HostedZoneConfig:
+        Comment: DR lab zone - queried directly via its own nameservers, not publicly delegated
+
   PrimaryHealthCheck:
     Type: AWS::Route53::HealthCheck
     Properties:
       HealthCheckConfig:
         Type: HTTP
-        FullyQualifiedDomainName: !Ref PrimaryEndpoint
+        IPAddress: !Ref PrimaryIp
         Port: 80
         ResourcePath: /
         RequestInterval: 30
@@ -38,7 +48,7 @@ Resources:
   PrimaryRecord:
     Type: AWS::Route53::RecordSet
     Properties:
-      HostedZoneId: !Ref HostedZoneId
+      HostedZoneId: !Ref DrHostedZone
       Name: !Ref AppRecordName
       Type: A
       SetIdentifier: Primary
@@ -51,7 +61,7 @@ Resources:
   SecondaryRecord:
     Type: AWS::Route53::RecordSet
     Properties:
-      HostedZoneId: !Ref HostedZoneId
+      HostedZoneId: !Ref DrHostedZone
       Name: !Ref AppRecordName
       Type: A
       SetIdentifier: Secondary
@@ -64,3 +74,8 @@ Outputs:
   HealthCheckId:
     Value: !Ref PrimaryHealthCheck
     Description: Pass this to monitoring.yaml as HealthCheckId
+  HostedZoneId:
+    Value: !Ref DrHostedZone
+  NameServers:
+    Value: !Join [', ', !GetAtt DrHostedZone.NameServers]
+    Description: Query these directly, e.g. dig @<one-of-these> app.dr-lab.internal
