@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Automated data protection: KMS-encrypted AWS Backup vault, daily backup plan
+  with cross-region copy, and tag-based resource selection.
+  Deploy this stack in the PRIMARY region. Deploy backup-secondary-vault.yaml
+  in the SECONDARY region first, so its vault ARN exists as a copy target.
+
+Parameters:
+  BackupVaultName:
+    Type: String
+    Default: prod-backup-vault
+  SecondaryVaultArn:
+    Type: String
+    Description: ARN of the backup vault in the secondary region (deploy backup-secondary-vault.yaml there first)
+  KmsKeyArn:
+    Type: String
+    Description: ARN of the KMS key used to encrypt the primary backup vault
+  TagKey:
+    Type: String
+    Default: Environment
+  TagValue:
+    Type: String
+    Default: Production
+  ScheduleExpression:
+    Type: String
+    Default: cron(0 0 * * ? *)
+    Description: Daily at midnight UTC by default
+  ColdStorageAfterDays:
+    Type: Number
+    Default: 30
+  DeleteAfterDays:
+    Type: Number
+    Default: 365
+
+Resources:
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !Ref BackupVaultName
+      EncryptionKeyArn: !Ref KmsKeyArn
+
+  BackupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-backup-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+
+  BackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: DailyProdBackups
+        BackupPlanRule:
+          - RuleName: DailyBackups
+            TargetBackupVault: !Ref BackupVaultName
+            ScheduleExpression: !Ref ScheduleExpression
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 180
+            Lifecycle:
+              MoveToColdStorageAfterDays: !Ref ColdStorageAfterDays
+              DeleteAfterDays: !Ref DeleteAfterDays
+            CopyActions:
+              - DestinationBackupVaultArn: !Ref SecondaryVaultArn
+    DependsOn: BackupVault
+
+  BackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId: !Ref BackupPlan
+      BackupSelection:
+        SelectionName: ProdResourcesByTag
+        IamRoleArn: !GetAtt BackupRole.Arn
+        ListOfTags:
+          - ConditionType: STRINGEQUALS
+            ConditionKey: !Ref TagKey
+            ConditionValue: !Ref TagValue
+
+Outputs:
+  BackupVaultArn:
+    Value: !GetAtt BackupVault.BackupVaultArn
+  BackupPlanId:
+    Value: !Ref BackupPlan
