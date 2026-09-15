@@ -1,0 +1,11 @@
+{
+  "SelectionName": "ProdResourcesByTag",
+  "IamRoleArn": "__IAM_BACKUP_ROLE_ARN__",
+  "ListOfTags": [
+    {
+      "ConditionType": "STRINGEQUALS",
+      "ConditionKey": "__TAG_KEY__",
+      "ConditionValue": "__TAG_VALUE__"
+    }
+  ]
+}
