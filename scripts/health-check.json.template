@@ -1,0 +1,8 @@
+{
+  "FullyQualifiedDomainName": "__PRIMARY_ENDPOINT__",
+  "Port": 80,
+  "Type": "HTTP",
+  "ResourcePath": "/",
+  "RequestInterval": 30,
+  "FailureThreshold": 3
+}

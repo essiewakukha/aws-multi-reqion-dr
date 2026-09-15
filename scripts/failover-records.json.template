@@ -1,0 +1,28 @@
+{
+  "Comment": "Failover routing for DR lab",
+  "Changes": [
+    {
+      "Action": "CREATE",
+      "ResourceRecordSet": {
+        "Name": "__APP_RECORD_NAME__.",
+        "Type": "A",
+        "SetIdentifier": "Primary",
+        "Failover": "PRIMARY",
+        "TTL": 60,
+        "ResourceRecords": [{ "Value": "__PRIMARY_IP__" }],
+        "HealthCheckId": "__HEALTH_CHECK_ID__"
+      }
+    },
+    {
+      "Action": "CREATE",
+      "ResourceRecordSet": {
+        "Name": "__APP_RECORD_NAME__.",
+        "Type": "A",
+        "SetIdentifier": "Secondary",
+        "Failover": "SECONDARY",
+        "TTL": 60,
+        "ResourceRecords": [{ "Value": "__SECONDARY_IP__" }]
+      }
+    }
+  ]
+}
