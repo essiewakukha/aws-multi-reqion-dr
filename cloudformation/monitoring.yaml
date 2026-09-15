@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CloudWatch alarm on the Route 53 health check (must exist in us-east-1
+  metrics, as Route 53 health check metrics are always published there).
+  Publishes to an SNS topic for both human alerting (email) and the
+  automated-dr Lambda subscription.
+
+Parameters:
+  HealthCheckId:
+    Type: String
+    Description: Output from route53-failover.yaml
+  AlertEmail:
+    Type: String
+    Description: Email address to notify on failover events
+    Default: ''
+
+Conditions:
+  HasEmail: !Not [!Equals [!Ref AlertEmail, '']]
+
+Resources:
+  DrAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: dr-failover-alerts
+      DisplayName: DR Failover Alerts
+
+  EmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasEmail
+    Properties:
+      TopicArn: !Ref DrAlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  PrimaryUnhealthyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: primary-endpoint-unhealthy
+      AlarmDescription: Fires when the Route 53 health check on the primary endpoint goes unhealthy
+      Namespace: AWS/Route53
+      MetricName: HealthCheckStatus
+      Dimensions:
+        - Name: HealthCheckId
+          Value: !Ref HealthCheckId
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref DrAlertTopic
+      OKActions:
+        - !Ref DrAlertTopic
+
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: dr-failover-dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Primary endpoint health check status",
+                "metrics": [
+                  ["AWS/Route53", "HealthCheckStatus", "HealthCheckId", "${HealthCheckId}"]
+                ],
+                "period": 60,
+                "stat": "Minimum",
+                "region": "us-east-1",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "alarm",
+              "x": 0, "y": 6, "width": 12, "height": 4,
+              "properties": {
+                "title": "Failover alarm state",
+                "alarms": ["${PrimaryUnhealthyAlarm.Arn}"]
+              }
+            }
+          ]
+        }
+
+Outputs:
+  DrAlertTopicArn:
+    Value: !Ref DrAlertTopic
+    Description: Pass this to automated-dr.yaml as AlertTopicArn
+  DashboardUrl:
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=dr-failover-dashboard'
